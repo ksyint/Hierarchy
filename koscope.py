@@ -320,6 +320,13 @@ def _dispatch_download(argv):
 
 
 COMMANDS = {
+    'annotations': 'safety.data.annotations.validation',
+    'partitions': 'safety.data.partitions.audit',
+    'benchmark': 'safety.evaluation.decisions.benchmark',
+    'review': 'safety.generation.review.candidates',
+    'artifact': 'safety.models.artifacts.checkpoint',
+    'study': 'safety.experiments.curriculum.study',
+
     'download': _dispatch_download,
     'prepare': _dispatch_prepare,
     'catalog': command_catalog,
@@ -336,7 +343,11 @@ def main(argv=None):
     parser.add_argument('command', choices=COMMANDS)
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    COMMANDS[args.command](args.arguments)
+    handler = COMMANDS[args.command]
+    if isinstance(handler, str):
+        from importlib import import_module
+        handler = import_module(handler).main
+    handler(args.arguments)
 
 
 if __name__ == '__main__':

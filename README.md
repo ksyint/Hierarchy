@@ -119,3 +119,19 @@ python koscope.py train --recipe korean/g20/b010/standard/k008/r020 --checkpoint
 ```
 
 `benchmarks/korean.py` handles prompt grouping, record formatting and experience streams. `methods/preference.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
+
+## Workflow modules
+
+The nested `safety/` modules connect annotation review, token budgets, prompt-disjoint splits, counterfactual benchmarks, adapter artifacts and SFT-to-DPO studies. Existing training and inference commands retain their arguments.
+
+- [Source layout](docs/architecture/source-layout.md)
+- [Adapter artifacts](docs/artifacts/adapter-packages.md)
+- [Annotation contracts](docs/data/annotation-contract.md)
+- [Prompt-disjoint partitions](docs/data/partitions.md)
+- [Tokenizer budgets](docs/data/tokenization.md)
+- [Language and paired comparisons](docs/evaluation/cross-language.md)
+- [Decision benchmarks](docs/evaluation/decision-benchmarks.md)
+- [Curriculum studies](docs/experiments/curriculum-studies.md)
+- [Teacher candidate review](docs/generation/teacher-review.md)
+
+Each extended command exposes its options through `python koscope.py COMMAND --help`. JSON schemas are in `schemas/` and replaceable input examples are in `examples/`.

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Teacher Seed",
+  "type": "object",
+  "required": [
+    "prompt",
+    "level",
+    "decision"
+  ],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "level": {
+      "type": "integer",
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "decision": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "cf_prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cf_decision": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

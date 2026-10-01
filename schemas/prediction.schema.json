@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Prediction",
+  "type": "object",
+  "required": [
+    "id",
+    "decision",
+    "prediction",
+    "refusal_probability"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "prediction": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "refusal_probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "cf_decision": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "cf_prediction": {
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "cf_refusal_probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "level": {
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

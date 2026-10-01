@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Study",
+  "type": "object",
+  "required": [
+    "format",
+    "repository",
+    "stages"
+  ],
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "identity",
+          "phase",
+          "output",
+          "command",
+          "prerequisites",
+          "inputs"
+        ]
+      }
+    }
+  },
+  "additionalProperties": true
+}

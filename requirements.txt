@@ -8,3 +8,4 @@ safetensors>=0.5
 sentencepiece>=0.2
 
 datasketch>=1.6
+jsonschema>=4.23,<5

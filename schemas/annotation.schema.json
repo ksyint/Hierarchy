@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Annotation",
+  "type": "object",
+  "required": [
+    "prompt",
+    "chosen",
+    "rejected_easy",
+    "rejected_hard",
+    "level",
+    "decision"
+  ],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "chosen": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rejected_easy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rejected_hard": {
+      "type": "string",
+      "minLength": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "level": {
+      "type": "integer",
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "decision": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "cf_prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cf_decision": {
+      "type": "integer",
+      "enum": [
+        0,
+        1
+      ]
+    },
+    "language": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}
