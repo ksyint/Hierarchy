@@ -22,21 +22,21 @@ The loader places model weights on the selected `cuda`/`cuda:N` device in BF16. 
 | `exaone-2.4b` | [LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | `checkpoints/exaone-2.4b/` |
 | `gemma3-4b` | [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it) | `checkpoints/gemma3-4b/` |
 
-`networks/pretrained.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
+`methods/preference.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
 
 ```bash
-python inference.py --model qwen3-4b --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
+python koscope.py infer --model qwen3-4b --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
 ```
 
 To download on another connected machine, export a complete local directory:
 
 ```bash
-python -m networks.pretrained --model qwen3-4b --destination checkpoints/qwen3-4b
-python inference.py --model qwen3-4b --local-model checkpoints/qwen3-4b --offline \
+python koscope.py download --model qwen3-4b --destination checkpoints/qwen3-4b
+python koscope.py infer --model qwen3-4b --local-model checkpoints/qwen3-4b --offline \
   --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
 ```
 
-For a browser download, open the model's linked **Files and versions** page at the revision printed by `python -m networks.pretrained --list`. Put `config.json`, tokenizer files, the safetensors index and **every** safetensors shard in the table's local directory. Preserve filenames. Include EXAONE's `configuration_exaone.py` and `modeling_exaone.py`. Pass the same `--model` alias together with `--local-model DIRECTORY`. Gemma requires accepting its Hugging Face model terms and running `hf auth login` on the downloading machine. Authentication can also use the standard `HF_TOKEN` environment variable.
+For a browser download, open the model's linked **Files and versions** page at the revision printed by `python koscope.py download --list`. Put `config.json`, tokenizer files, the safetensors index and **every** safetensors shard in the table's local directory. Preserve filenames. Include EXAONE's `configuration_exaone.py` and `modeling_exaone.py`. Pass the same `--model` alias together with `--local-model DIRECTORY`. Gemma requires accepting its Hugging Face model terms and running `hf auth login` on the downloading machine. Authentication can also use the standard `HF_TOKEN` environment variable.
 
 The loader targets all language attention and MLP linear projections, resolves EXAONE projection names, and includes Gemma's language head. Gemma's visual tower remains frozen for this text task. Official chat templates are applied inside token batching. Input JSONL therefore contains ordinary prompt text.
 
@@ -53,7 +53,7 @@ Obtain SQuARe and KoSBi from the `data/` directories in [Korean Safety Benchmark
 `level` is an integer: 1 for explicit harms, 2 for contextual social harms, and 3 for nuanced intent-sensitive domains. `decision` is 0 for comply and 1 for refuse. Assign these from reviewed annotations. Preserve `source` and fine-grained `category` for stratification. Supply enough independent prompt groups in each stratum to populate the held-out splits. Each level needs at least four independent groups across the corpus. Both counterfactual fields are supplied together. Their decision labels should reflect the changed intent. Reasoning fields are optional. Keep prompts and completions separate and do not pre-render chat templates or add special tokenizer tokens.
 
 ```bash
-python prepare_data.py --input data/raw/annotated.jsonl --output data/korean --seed 42
+python koscope.py prepare --input data/raw/annotated.jsonl --output data/korean --seed 42
 ```
 
 Preparation normalizes Unicode to NFC, strips surrounding whitespace and applies five-character MinHash near-duplicate filtering at Jaccard 0.85 before splitting. Records connected through matching or near-duplicate primary/counterfactual prompts remain in the same partition. The grouped allocator balances source/category/level strata toward 10% validation, 10% test, 32% SFT and 48% preference training. The two training targets correspond to a 40/60 division of the training pool. Actual counts follow whole prompt groups and all four splits contain all three levels. The generated layout is:
@@ -71,27 +71,27 @@ Use official held-out sets unchanged when they already exist. Prepare training p
 
 ### Teacher-generated candidate responses
 
-`generate_preferences.py` loads the three teachers sequentially and writes candidate response fields for review. Its input JSONL supplies `prompt`, reviewed `level` and `decision`, plus optional reviewed counterfactual fields. The strong teacher is [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B), the medium teacher [Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B), and the weak teacher [Qwen3-8B-AWQ](https://huggingface.co/Qwen/Qwen3-8B-AWQ). Create a separate teacher environment with the pinned PyTorch 2.6.0, Transformers 4.51.3 and AutoAWQ 0.2.9 stack. AutoAWQ uses its Triton backend for CUDA inference:
+`koscope.py candidates` loads the three teachers sequentially and writes candidate response fields for review. Its input JSONL supplies `prompt`, reviewed `level` and `decision`, plus optional reviewed counterfactual fields. The strong teacher is [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B), the medium teacher [Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B), and the weak teacher [Qwen3-8B-AWQ](https://huggingface.co/Qwen/Qwen3-8B-AWQ). Create a separate teacher environment with the pinned PyTorch 2.6.0, Transformers 4.51.3 and AutoAWQ 0.2.9 stack. AutoAWQ uses its Triton backend for CUDA inference:
 
 ```bash
 python3.10 -m venv .venv-teachers
 .venv-teachers/bin/python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 .venv-teachers/bin/python -m pip install -r requirements-teachers.txt
-.venv-teachers/bin/python generate_preferences.py --seeds data/raw/prompts.jsonl --output data/raw/candidates.jsonl --device cuda
+.venv-teachers/bin/python koscope.py candidates --seeds data/raw/prompts.jsonl --output data/raw/candidates.jsonl --device cuda
 ```
 
-Review the preference ordering and intent annotations, then provide the curated file to `prepare_data.py`. The 32B teacher is placed on the selected GPU. Select a device with enough memory for its BF16 weights. Automatic downloads use the same pinned registry and cache as training. For an offline machine, download aliases `teacher-strong`, `teacher-medium` and `teacher-weak` with `python -m networks.pretrained --model ALIAS --destination checkpoints/teachers/ALIAS`. Copy the entire parent folder and pass `--teacher-root checkpoints/teachers --offline`.
+Review the preference ordering and intent annotations, then provide the curated file to `koscope.py prepare`. The 32B teacher is placed on the selected GPU. Select a device with enough memory for its BF16 weights. Automatic downloads use the same pinned registry and cache as training. For an offline machine, download aliases `teacher-strong`, `teacher-medium` and `teacher-weak` with `python koscope.py download --model ALIAS --destination checkpoints/teachers/ALIAS`. Copy the entire parent folder and pass `--teacher-root checkpoints/teachers --offline`.
 
 ## Supervised and preference training
 
 ```bash
-python train.py --model qwen3-4b --stage sft --data data/korean/sft.jsonl \
+python koscope.py train --model qwen3-4b --stage sft --data data/korean/sft.jsonl \
   --validation data/korean/validation.jsonl --output outputs/sft --device cuda
-python train.py --checkpoint outputs/sft/last.pt --stage dpo \
+python koscope.py train --checkpoint outputs/sft/last.pt --stage dpo \
   --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl \
   --output outputs/dpo --device cuda
-python eval.py --checkpoint outputs/dpo/last.pt --data data/korean/test.jsonl --device cuda
-python inference.py --checkpoint outputs/dpo/last.pt \
+python koscope.py evaluate --checkpoint outputs/dpo/last.pt --data data/korean/test.jsonl --device cuda
+python koscope.py infer --checkpoint outputs/dpo/last.pt \
   --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
 ```
 
@@ -112,10 +112,10 @@ Opposite-label counterfactual pairs use paired decision likelihood. Same-label p
 The 243 recipes under `configs/experiments/korean/` vary initial margin, DPO temperature, competence gates, decay and replay. Every recipe drives the same pretrained-model learner:
 
 ```bash
-python train.py --list-recipes
-python train.py --recipe korean/g20/b010/standard/k008/r020 --dry-run
-python train.py --recipe korean/g20/b010/standard/k008/r020 --checkpoint outputs/sft/last.pt \
+python koscope.py train --list-recipes
+python koscope.py train --recipe korean/g20/b010/standard/k008/r020 --dry-run
+python koscope.py train --recipe korean/g20/b010/standard/k008/r020 --checkpoint outputs/sft/last.pt \
   --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl --output outputs/recipe
 ```
 
-`benchmarks/` handles record formatting and streams, `methods/` implements curriculum and losses, `networks/` loads pretrained models and scores tokens, and `experiments/` manages the run lifecycle. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
+`benchmarks/korean.py` handles prompt grouping, record formatting and experience streams. `methods/preference.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
