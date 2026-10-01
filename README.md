@@ -22,7 +22,7 @@ The loader places model weights on the selected `cuda`/`cuda:N` device in BF16. 
 | `exaone-2.4b` | [LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | `checkpoints/exaone-2.4b/` |
 | `gemma3-4b` | [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it) | `checkpoints/gemma3-4b/` |
 
-`safety/models/preference/learner.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
+`safety/models/learner.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
 
 ```bash
 python koscope.py infer --model qwen3-4b --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
@@ -109,7 +109,7 @@ L = L_HARM + lambda_ccr * L_CCR
 
 Opposite-label counterfactual pairs use paired decision likelihood. Same-label pairs use symmetric KL. Decision verbalizers may span multiple tokens. Competence gates combine per-level loss EMA and held-out decision accuracy. The curriculum retains lower-level replay, increases hard-negative probability and fades explicit reasoning supervision.
 
-The 243 recipes under `configs/experiments/korean/` vary initial margin, DPO temperature, competence gates, decay and replay. Every recipe drives the same pretrained-model learner:
+The 243 recipes under `configs/` vary initial margin, DPO temperature, competence gates, decay and replay. Every recipe drives the same pretrained-model learner. `--config` accepts YAML or a Python file containing one literal `CONFIG` dictionary. `--recipe` keeps the same logical names regardless of file format or placement. The catalog builder restores both formats in their assigned locations:
 
 ```bash
 python koscope.py train --list-recipes
@@ -118,20 +118,20 @@ python koscope.py train --recipe korean/g20/b010/standard/k008-r020 --checkpoint
   --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl --output outputs/recipe
 ```
 
-`safety/data/annotations/korean.py` handles prompt grouping, record formatting and experience streams. `safety/models/preference/learner.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
+`safety/data/korean.py` handles prompt grouping, record formatting and experience streams. `safety/models/learner.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
 
 ## Workflow modules
 
 The nested `safety/` modules connect annotation review, token budgets, prompt-disjoint splits, counterfactual benchmarks, adapter artifacts and SFT-to-DPO studies. Existing training and inference commands retain their arguments.
 
-- [Source layout](docs/experiments/source-layout.md)
-- [Adapter artifacts](docs/experiments/adapter-packages.md)
+- [Source layout](docs/source-layout.md)
+- [Adapter artifacts](docs/adapter-packages.md)
 - [Annotation contracts](docs/data/annotation-contract.md)
 - [Prompt-disjoint partitions](docs/data/partitions.md)
 - [Tokenizer budgets](docs/data/tokenization.md)
 - [Language and paired comparisons](docs/evaluation/cross-language.md)
 - [Decision benchmarks](docs/evaluation/decision-benchmarks.md)
-- [Curriculum studies](docs/experiments/curriculum-studies.md)
+- [Curriculum studies](docs/curriculum-studies.md)
 - [Teacher candidate review](docs/data/teacher-review.md)
 
 Each extended command exposes its options through `python koscope.py COMMAND --help`. JSON schemas are in `schemas/` and replaceable input examples are in `examples/`.

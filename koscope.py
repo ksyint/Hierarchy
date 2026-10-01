@@ -9,15 +9,15 @@ from pathlib import Path
 import random
 
 import torch
-import yaml
 
-from safety.data.annotations.korean import LevelBenchmark
-from safety.data.annotations.korean import load_records
-from safety.models.preference.learner import HARMLearner, SFTLearner, save_experiment
-from safety.models.preference.backbones import restore
-from safety.models.preference.backbones import cuda_device, load_model
-from safety.models.preference.learner import decision_logits, prompt_ids
-from safety.models.preference.backbones import resolve_backbone
+from safety.data.korean import LevelBenchmark
+from safety.data.korean import load_records
+from safety.models.learner import HARMLearner, SFTLearner, save_experiment
+from safety.models.backbones import restore
+from safety.models.backbones import cuda_device, load_model
+from safety.models.learner import decision_logits, prompt_ids
+from safety.models.backbones import resolve_backbone
+from safety.study import catalog_layout, load_recipe, save_recipe
 
 
 ROOT = Path(__file__).resolve().parent
@@ -25,8 +25,13 @@ CATALOG = ROOT / 'configs' / 'experiments'
 
 
 def recipes():
-    return {path.relative_to(CATALOG).with_suffix('').as_posix(): path
-            for path in sorted(CATALOG.rglob('*.yaml'))}
+    result = {name: recipe_path(name) for name in RECIPE_NAMES}
+    for path in result.values():
+        if not path.is_file():
+            raise FileNotFoundError(f'Missing recipe file: {path}')
+        if path.with_suffix('.yaml' if path.suffix == '.py' else '.py').is_file():
+            raise ValueError(f'Keep one active file per recipe identifier: {path}')
+    return result
 
 
 def resolve_recipe(name):
@@ -75,10 +80,24 @@ DECAY = {'k004': 0.04, 'k008': 0.08, 'k012': 0.12}
 REPLAY = {'r020': 0.20, 'r030': 0.30, 'r040': 0.40}
 
 
+def recipe_name(gamma, beta, gate, decay, replay):
+    return f'korean/{gamma}/{beta}/{gate}/{decay}-{replay}'
+
+
+RECIPE_NAMES = sorted(recipe_name(*values) for values in product(GAMMA, BETA, GATES, DECAY, REPLAY))
+PYTHON_RECIPES = frozenset(RECIPE_NAMES[:108])
+RECIPE_LAYOUT = catalog_layout(Path('configs/experiments') / (name + '.yaml') for name in RECIPE_NAMES)
+
+
+def recipe_path(name):
+    relative = RECIPE_LAYOUT[Path('configs/experiments') / (name + '.yaml')]
+    return ROOT / relative.with_suffix('.py' if name in PYTHON_RECIPES else '.yaml')
+
+
 def command_catalog(argv=None):
     parser = argparse.ArgumentParser(description='Regenerate the Korean preference recipe catalog.')
     parser.parse_args(argv)
-    base = yaml.safe_load((ROOT / 'harm.yaml').read_text())
+    base = load_recipe(ROOT / 'harm.yaml')
     count = 0
     for gamma, beta, gate, decay, replay in product(GAMMA, BETA, GATES, DECAY, REPLAY):
         config = copy.deepcopy(base)
@@ -88,9 +107,9 @@ def command_catalog(argv=None):
                                     probe_threshold=probe_threshold, kappa=DECAY[decay],
                                     lower_replay=REPLAY[replay])
         validate_recipe(config)
-        path = CATALOG / 'korean' / gamma / beta / gate / (decay + '-' + replay + '.yaml')
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(yaml.safe_dump(config, sort_keys=False))
+        name = recipe_name(gamma, beta, gate, decay, replay)
+        path = recipe_path(name)
+        save_recipe(path, config)
         count += 1
     print(f'Built {count} preference recipes.')
 
@@ -102,7 +121,7 @@ def run_experiment(args):
     if args.recipe and args.config:
         raise ValueError('Select --recipe or --config, not both.')
     config_path = resolve_recipe(args.recipe) if args.recipe else (args.config or 'harm.yaml')
-    config = validate_recipe(yaml.safe_load(Path(config_path).read_text()))
+    config = validate_recipe(load_recipe(config_path))
     config['pretrained'] = dict(model_name=args.model, local_dir=args.local_model, cache_dir=args.cache_dir,
                                 offline=args.offline, attention=args.attention,
                                 gradient_checkpointing=args.gradient_checkpointing, lora=args.lora)
@@ -317,22 +336,22 @@ def command_infer(argv=None):
 
 
 def _dispatch_prepare(argv):
-    from safety.data.annotations.korean import command_prepare
+    from safety.data.korean import command_prepare
     return command_prepare(argv)
 
 
 def _dispatch_download(argv):
-    from safety.models.preference.backbones import command_download
+    from safety.models.backbones import command_download
     return command_download(argv)
 
 
 COMMANDS = {
-    'annotations': 'safety.data.annotations.validation',
-    'partitions': 'safety.data.annotations.audit',
-    'benchmark': 'safety.evaluation.decisions.benchmark',
-    'review': 'safety.data.annotations.candidates',
-    'artifact': 'safety.experiments.curriculum.checkpoint',
-    'study': 'safety.experiments.curriculum.study',
+    'annotations': 'safety.data.validation',
+    'partitions': 'safety.data.audit',
+    'benchmark': 'safety.evaluation.benchmark',
+    'review': 'safety.data.candidates',
+    'artifact': 'safety.checkpoint',
+    'study': 'safety.study',
 
     'download': _dispatch_download,
     'prepare': _dispatch_prepare,
