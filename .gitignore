@@ -6,3 +6,8 @@ outputs/
 *.pt
 *.pth
 .venv/
+.venv-teachers/
+/.cache/
+/checkpoints/
+*.safetensors
+*.bin

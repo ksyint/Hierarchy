@@ -19,7 +19,7 @@ class HierarchicalCurriculum:
         self.ema = {}
 
     def update(self, epoch, level_losses, probe_accuracy):
-        # At most one sequential unlock after the epoch; use the next epoch as start.
+        # Unlock at most one level after an epoch, starting it in the next epoch.
         for level, loss in level_losses.items():
             if level in self.unlock_epoch:
                 previous = self.ema.get(level, float(loss))
@@ -41,8 +41,7 @@ class HierarchicalCurriculum:
 
     def level_probabilities(self, epoch):
         available = sorted(level for level, start in self.unlock_epoch.items() if start <= epoch)
-        # The manuscript leaves w_l(e) unspecified. This explicit default increases
-        # the newest level's logit during its hard-negative ramp.
+        # Increase the newest level's logit during its hard-negative ramp.
         logits = torch.tensor([(level - 1) * self.hard_probability(level, epoch) for level in available])
         probabilities = logits.softmax(0)
         if len(available) > 1 and probabilities[:-1].sum() < self.lower_replay:

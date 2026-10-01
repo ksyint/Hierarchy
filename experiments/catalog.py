@@ -19,12 +19,14 @@ def resolve_recipe(name):
 
 
 def validate_recipe(config):
-    required = {'seed', 'model_dim', 'batch_size', 'epochs', 'steps_per_epoch', 'lr',
+    required = {'seed', 'batch_size', 'epochs', 'steps_per_epoch', 'lr',
                 'weight_decay', 'beta', 'lambda_ccr', 'max_length', 'decision_tokens', 'curriculum'}
     if not required <= config.keys():
         raise ValueError(f'Missing recipe keys: {sorted(required - config.keys())}')
-    if any(config[key] <= 0 for key in ('model_dim', 'batch_size', 'epochs', 'steps_per_epoch', 'lr', 'beta', 'max_length')):
+    if any(config[key] <= 0 for key in ('batch_size', 'epochs', 'lr', 'beta', 'max_length')):
         raise ValueError('Model, batching, optimization, beta, and sequence length settings must be positive.')
+    if config['steps_per_epoch'] is not None and config['steps_per_epoch'] < 1:
+        raise ValueError('steps_per_epoch must be positive or null to cover the data pool.')
     if len(config['decision_tokens']) != 2 or not all(isinstance(token, str) and token for token in config['decision_tokens']):
         raise ValueError('Specify two nonempty decision verbalizers in [comply, refuse] order.')
     curriculum = config['curriculum']

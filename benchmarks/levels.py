@@ -1,6 +1,6 @@
 import random
 
-from .records import load_records, synthetic_records
+from .records import load_records, record_prompts
 
 
 class LevelExperience:
@@ -23,8 +23,10 @@ class LevelBenchmark:
             raise ValueError('Training data must contain all three levels.')
         if {row['level'] for row in validation} != {1, 2, 3}:
             raise ValueError('Validation data must contain all three levels for competence gates.')
-        if {row['prompt'] for row in train} & {row['prompt'] for row in validation}:
-            raise ValueError('Training and validation prompts must be disjoint.')
+        training_prompts = {prompt for row in train for prompt in record_prompts(row)}
+        validation_prompts = {prompt for row in validation for prompt in record_prompts(row)}
+        if training_prompts & validation_prompts:
+            raise ValueError('Training and validation primary/counterfactual prompts must be disjoint.')
         self.epochs = epochs
         self.test_stream = validation
 
@@ -34,8 +36,8 @@ class LevelBenchmark:
 
     @classmethod
     def from_paths(cls, data, validation, epochs):
-        if data and not validation:
-            raise ValueError('Real-data training requires a disjoint --validation JSONL.')
-        train = load_records(data) if data else synthetic_records()
-        test = load_records(validation) if validation else synthetic_records(24, 1000)
+        if not data or not validation:
+            raise ValueError('Training requires --data and a disjoint --validation JSONL.')
+        train = load_records(data)
+        test = load_records(validation)
         return cls(train, test, epochs)

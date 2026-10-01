@@ -1,8 +1,7 @@
 seed: 42
-model_dim: 48
-batch_size: 4
+batch_size: 1
 epochs: 80
-steps_per_epoch: 20
+steps_per_epoch: null
 lr: 5.0e-06
 weight_decay: 0.01
 beta: 0.1
@@ -26,3 +25,6 @@ curriculum:
   lower_replay: 0.2
   explicit_start: 48
   explicit_fade: 32
+gradient_accumulation: 32
+sft_epochs: 50
+sft_lr: 2.0e-05

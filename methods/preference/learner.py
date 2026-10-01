@@ -39,11 +39,6 @@ class PreferenceLearner:
         losses = []
         epoch = experience.current_experience
         for iteration in range(self.config['steps_per_epoch']):
-            rows = experience.sample(self.config['batch_size'], self.curriculum, self.stage)
-            loss, plain_dpo = self.objective(rows, epoch)
-            if plain_dpo is not None:
-                for row, value in zip(rows, plain_dpo.detach().tolist()):
-                    self.losses_by_level[row['level']].append(value)
             step = epoch * self.config['steps_per_epoch'] + iteration
             if step < self.warmup:
                 scale = (step + 1) / self.warmup
@@ -53,10 +48,19 @@ class PreferenceLearner:
             for group in self.optimizer.param_groups:
                 group['lr'] = self.config['lr'] * scale
             self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            accumulation = self.config.get('gradient_accumulation', 1)
+            accumulated_loss = 0
+            for _ in range(accumulation):
+                rows = experience.sample(self.config['batch_size'], self.curriculum, self.stage)
+                loss, plain_dpo = self.objective(rows, epoch)
+                if plain_dpo is not None:
+                    for row, value in zip(rows, plain_dpo.detach().tolist()):
+                        self.losses_by_level[row['level']].append(value)
+                (loss / accumulation).backward()
+                accumulated_loss += loss.detach().item() / accumulation
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
-            losses.append(loss.item())
+            losses.append(accumulated_loss)
         self.last_train_loss = sum(losses) / len(losses)
         return self.last_train_loss
 

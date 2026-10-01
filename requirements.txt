@@ -1,3 +1,10 @@
 torch>=2.1
 PyYAML>=6.0
-pytest>=7.0
+transformers>=4.57.1,<5
+peft>=0.17,<0.19
+accelerate>=1.0
+huggingface-hub>=0.34,<1
+safetensors>=0.5
+sentencepiece>=0.2
+
+datasketch>=1.6

@@ -1,0 +1,9 @@
+torch==2.6.0
+transformers==4.51.3
+tokenizers>=0.21,<0.22
+peft==0.15.2
+accelerate>=1.0,<2
+huggingface-hub>=0.30,<1
+safetensors>=0.5,<1
+sentencepiece>=0.2,<0.3
+autoawq==0.2.9

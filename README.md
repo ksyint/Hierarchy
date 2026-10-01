@@ -1,95 +1,121 @@
 # Hierarchy Aware Preference Optimization
 
-**Hierarchy Aware Preference Optimization for the Safety of Korean Small Language Models**
-Soo Yong Kim, Junyoung Koh, Kyeonghun Kim, Seunghyeok Hong.
+KoSCoPe trains released Korean language models with supervised adaptation, a three-level safety curriculum, HARM-DPO, counterfactual consistency and reasoning internalization. The default is **Qwen3-4B with rank-16 LoRA**, loaded from Hugging Face when training or inference starts.
 
-KoSCoPe combines a three-level competence curriculum, HARM-DPO, counterfactual decision consistency, and stochastic reasoning internalization. This repository organizes training as a sequence of level experiences consumed by preference-learning strategies.
+## CUDA environment
 
-## Preference learning
-
-`HARMLearner` scores preferred and rejected completions against a frozen reference. Its objective is:
-
-```text
-L_HARM = -log sigmoid(beta * [(log pi_w - log pi_l) - (log ref_w - log ref_l)] - gamma_level)
-gamma_level = gamma0 * exp(-kappa * (epoch - unlock_epoch))
-L_CCR = -log p(correct decision | x) - log p(correct flipped decision | x')
-L = L_HARM + lambda_ccr * L_CCR
-```
-
-Completion likelihood includes EOS and excludes prompt/padding tokens. Counterfactual pairs with opposite labels use paired decision NLL; same-label pairs use half-symmetric KL. The probe reads two next-token verbalizers in `[comply, refuse]` order.
-
-The curriculum opens levels sequentially when both the EMA loss and held-out behavioral accuracy satisfy their gates. Sampling retains a configured lower-level replay share, ramps toward hard negatives, and fades `[THINKING]` supervision after Level 3 reaches hard-negative saturation. `SFTLearner` supplies the preceding supervised phase and samples all three levels uniformly.
-
-## Dataset and backbone
-
-Use CUDA-enabled PyTorch with the Hugging Face/PEFT dependencies:
+Use Python 3.10+ and a CUDA-enabled PyTorch installation, then install the model dependencies:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-models.txt
+pip install -r requirements.txt
 ```
 
-Prepare UTF-8 JSONL records with explicit prompt, response and level annotations:
+The loader places model weights on the selected `cuda`/`cuda:N` device in BF16. Gradient checkpointing is enabled for training. The default microbatch is one and 32 accumulated microbatches form an optimizer update. `--batch-size` and `--accumulation` adjust this allocation. `--attention flash_attention_2` selects a separately installed FlashAttention kernel. EXAONE defaults to eager attention.
+
+## Automatic model downloads
+
+| Alias | Released checkpoint | Local directory |
+|---|---|---|
+| `qwen3-1.7b` | [Qwen/Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B) | `checkpoints/qwen3-1.7b/` |
+| `qwen3-4b` | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | `checkpoints/qwen3-4b/` |
+| `kanana-2.1b` | [kakaocorp/kanana-nano-2.1b-base](https://huggingface.co/kakaocorp/kanana-nano-2.1b-base) | `checkpoints/kanana-2.1b/` |
+| `exaone-2.4b` | [LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | `checkpoints/exaone-2.4b/` |
+| `gemma3-4b` | [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it) | `checkpoints/gemma3-4b/` |
+
+`networks/pretrained.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
+
+```bash
+python inference.py --model qwen3-4b --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
+```
+
+To download on another connected machine, export a complete local directory:
+
+```bash
+python -m networks.pretrained --model qwen3-4b --destination checkpoints/qwen3-4b
+python inference.py --model qwen3-4b --local-model checkpoints/qwen3-4b --offline \
+  --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
+```
+
+For a browser download, open the model's linked **Files and versions** page at the revision printed by `python -m networks.pretrained --list`. Put `config.json`, tokenizer files, the safetensors index and **every** safetensors shard in the table's local directory. Preserve filenames. Include EXAONE's `configuration_exaone.py` and `modeling_exaone.py`. Pass the same `--model` alias together with `--local-model DIRECTORY`. Gemma requires accepting its Hugging Face model terms and running `hf auth login` on the downloading machine. Authentication can also use the standard `HF_TOKEN` environment variable.
+
+The loader targets all language attention and MLP linear projections, resolves EXAONE projection names, and includes Gemma's language head. Gemma's visual tower remains frozen for this text task. Official chat templates are applied inside token batching. Input JSONL therefore contains ordinary prompt text.
+
+## Data preparation
+
+Start from permitted copies of the safety corpora used by the experiment: WildGuardMix, SQuARe, KorNAT, KOLD, KoSBi and BeaverTails-ko, or an annotated Korean corpus with the same fields. Export one UTF-8 JSON object per line to `data/raw/annotated.jsonl`:
 
 ```json
-{"prompt":"사용자 질문", "chosen":"선호 답변", "rejected_easy":"단순 비선호 답변", "rejected_hard":"어려운 비선호 답변", "level":3, "decision":0, "cf_prompt":"의도가 바뀐 질문", "cf_decision":1, "chosen_thinking":"검토 근거", "rejected_easy_thinking":"검토 근거", "rejected_hard_thinking":"검토 근거"}
+{"source":"corpus_name","category":"privacy","prompt":"사용자 질문","chosen":"선호 답변","rejected_easy":"단순 비선호 답변","rejected_hard":"어려운 비선호 답변","level":3,"decision":0,"cf_prompt":"의도가 바뀐 질문","cf_decision":1,"chosen_thinking":"검토 근거","rejected_easy_thinking":"검토 근거","rejected_hard_thinking":"검토 근거"}
 ```
 
-`decision` is 0 for comply and 1 for refuse. Supply counterfactual fields together. Optional reasoning fields are formatted as `[THINKING]...[/THINKING]`; faded examples receive `[WITHOUT_THINKING]`. Training and validation must each contain all three levels and use disjoint prompts. Keep the SFT/preference pools separate when following the 40%/60% partition.
+Obtain SQuARe and KoSBi from the `data/` directories in [Korean Safety Benchmarks](https://github.com/naver-ai/korean-safety-benchmarks), KOLD from its [published JSON](https://github.com/boychaboy/KOLD/tree/main/data), and KorNAT from its [dataset repository](https://github.com/jiyounglee-0523/KorNAT). [WildGuardMix](https://huggingface.co/datasets/allenai/wildguardmix) requires accepting its access terms. Preserve original example identifiers and official split assignments while converting records. Translate English source records into reviewed Korean text before annotation. An approved Korean BeaverTails export can enter the same schema.
 
-Choose a causal-language-model checkpoint and set two single-token `decision_tokens` for its tokenizer. Export prompts using that backbone's chat template. The LoRA adapter targets attention projections and MLP gate/up/down projections; configure module names for the selected backbone.
-
-## Run an experiment
-
-Model execution requires `cuda` or `cuda:N`. The reference model is a frozen copy of the initialized policy.
+`level` is an integer: 1 for explicit harms, 2 for contextual social harms, and 3 for nuanced intent-sensitive domains. `decision` is 0 for comply and 1 for refuse. Assign these from reviewed annotations. Preserve `source` and fine-grained `category` for stratification. Supply enough independent prompt groups in each stratum to populate the held-out splits. Each level needs at least four independent groups across the corpus. Both counterfactual fields are supplied together. Their decision labels should reflect the changed intent. Reasoning fields are optional. Keep prompts and completions separate and do not pre-render chat templates or add special tokenizer tokens.
 
 ```bash
-python train.py --dataset korean --model /path/to/base-model \
-  --data data/sft.jsonl --validation data/validation.jsonl --stage sft --epochs 50 \
-  --lora --device cuda --output outputs/sft
-python train.py --dataset korean --model /path/to/base-model \
-  --checkpoint outputs/sft/last.pt --data data/preferences.jsonl \
-  --validation data/validation.jsonl --lora --device cuda --output outputs/dpo
-python eval.py --checkpoint outputs/dpo/last.pt --data data/test.jsonl --device cuda
+python prepare_data.py --input data/raw/annotated.jsonl --output data/korean --seed 42
+```
+
+Preparation normalizes Unicode to NFC, strips surrounding whitespace and applies five-character MinHash near-duplicate filtering at Jaccard 0.85 before splitting. Records connected through matching or near-duplicate primary/counterfactual prompts remain in the same partition. The grouped allocator balances source/category/level strata toward 10% validation, 10% test, 32% SFT and 48% preference training. The two training targets correspond to a 40/60 division of the training pool. Actual counts follow whole prompt groups and all four splits contain all three levels. The generated layout is:
+
+```text
+data/korean/
+  sft.jsonl
+  preferences.jsonl
+  validation.jsonl
+  test.jsonl
+  split.json
+```
+
+Use official held-out sets unchanged when they already exist. Prepare training pools separately and export the same schema. The training loader verifies level coverage and rejects overlapping training/validation prompts in either primary or counterfactual fields, after Unicode and whitespace normalization. Long completions are rejected with a context-length error. Raise `max_length` or curate the affected records before training. Tokenization uses the downloaded tokenizer, masks prompt/padding tokens and includes completion EOS.
+
+### Teacher-generated candidate responses
+
+`generate_preferences.py` loads the three teachers sequentially and writes candidate response fields for review. Its input JSONL supplies `prompt`, reviewed `level` and `decision`, plus optional reviewed counterfactual fields. The strong teacher is [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B), the medium teacher [Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B), and the weak teacher [Qwen3-8B-AWQ](https://huggingface.co/Qwen/Qwen3-8B-AWQ). Create a separate teacher environment with the pinned PyTorch 2.6.0, Transformers 4.51.3 and AutoAWQ 0.2.9 stack. AutoAWQ uses its Triton backend for CUDA inference:
+
+```bash
+python3.10 -m venv .venv-teachers
+.venv-teachers/bin/python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+.venv-teachers/bin/python -m pip install -r requirements-teachers.txt
+.venv-teachers/bin/python generate_preferences.py --seeds data/raw/prompts.jsonl --output data/raw/candidates.jsonl --device cuda
+```
+
+Review the preference ordering and intent annotations, then provide the curated file to `prepare_data.py`. The 32B teacher is placed on the selected GPU. Select a device with enough memory for its BF16 weights. Automatic downloads use the same pinned registry and cache as training. For an offline machine, download aliases `teacher-strong`, `teacher-medium` and `teacher-weak` with `python -m networks.pretrained --model ALIAS --destination checkpoints/teachers/ALIAS`. Copy the entire parent folder and pass `--teacher-root checkpoints/teachers --offline`.
+
+## Supervised and preference training
+
+```bash
+python train.py --model qwen3-4b --stage sft --data data/korean/sft.jsonl \
+  --validation data/korean/validation.jsonl --output outputs/sft --device cuda
+python train.py --checkpoint outputs/sft/last.pt --stage dpo \
+  --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl \
+  --output outputs/dpo --device cuda
+python eval.py --checkpoint outputs/dpo/last.pt --data data/korean/test.jsonl --device cuda
 python inference.py --checkpoint outputs/dpo/last.pt \
   --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
 ```
 
-Checkpoints retain model weights, configuration, curriculum state, and the base-model identifier. Keep that base checkpoint accessible when restoring a LoRA experiment. `steps_per_epoch` controls the number of sampled preference minibatches per experience.
+SFT uses 50 epochs and peak LR `2e-5`. DPO uses 80 epochs and `5e-6`. AdamW uses weight decay 0.01, cosine decay, 5% warm-up and gradient clipping at 1.0. An epoch samples a data-pool-sized number of records. Set `--epochs` to change the duration. `pretrained/` contains the portable adapter and tokenizer. `last.pt` records the experiment and curriculum. Restoring downloads the pinned base automatically or accepts `--local-model` and `--offline`.
 
-## Strategy recipe catalog
+## Hierarchy and objectives
 
-The **243 recipes** under `configs/experiments/korean/` vary five implemented controls:
+`HARMLearner` scores completions against the frozen SFT reference. Its objective is:
 
-| Control | Settings |
-| --- | --- |
-| Initial margin `gamma0` | 0.5, 1.0, 2.0 |
-| DPO temperature `beta` | 0.05, 0.10, 0.20 |
-| Competence gates | conservative `(0.25,0.20; 0.90)`, standard `(0.35,0.30; 0.85)`, permissive `(0.45,0.40; 0.80)` |
-| Margin decay `kappa` | 0.04, 0.08, 0.12 |
-| Lower-level replay | 0.20, 0.30, 0.40 |
+```text
+L_HARM = -log sigmoid(beta * [(log pi_w - log pi_l) - (log ref_w - log ref_l)] - gamma_level)
+gamma_level = gamma0 * exp(-kappa * (epoch - unlock_epoch))
+L = L_HARM + lambda_ccr * L_CCR
+```
 
-Gate tuples contain the Level-1/Level-2 loss thresholds followed by required probe accuracy. Each file includes the complete optimizer, level-ramp, reasoning-fade, and CCR settings used by the learner.
+Opposite-label counterfactual pairs use paired decision likelihood. Same-label pairs use symmetric KL. Decision verbalizers may span multiple tokens. Competence gates combine per-level loss EMA and held-out decision accuracy. The curriculum retains lower-level replay, increases hard-negative probability and fades explicit reasoning supervision.
+
+The 243 recipes under `configs/experiments/korean/` vary initial margin, DPO temperature, competence gates, decay and replay. Every recipe drives the same pretrained-model learner:
 
 ```bash
 python train.py --list-recipes
 python train.py --recipe korean/g20/b010/standard/k008/r020 --dry-run
-python train.py --recipe korean/g20/b010/standard/k008/r020 \
-  --model /path/to/base-model --checkpoint outputs/sft/last.pt \
-  --data data/preferences.jsonl --validation data/validation.jsonl \
-  --lora --device cuda --output outputs/harm_standard
-python -m experiments.build_catalog
+python train.py --recipe korean/g20/b010/standard/k008/r020 --checkpoint outputs/sft/last.pt \
+  --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl --output outputs/recipe
 ```
 
-`--recipe` selects a validated catalog entry; `--config` accepts an explicit YAML path. `--dry-run` prints the resolved strategy and inputs without creating a model. The builder regenerates recipe files from `configs/korean/harm.yaml`.
-
-## Code organization and evaluation
-
-- `benchmarks/`: annotated records, reasoning formatting, and level-experience streams.
-- `methods/preference/`: supervised/HARM learner strategies and counterfactual objectives.
-- `methods/curriculum/`: competence gates, margins, replay and reasoning schedules.
-- `networks/`: token batching, completion scoring, decision probes and model loading.
-- `experiments/`: recipe discovery, experiment execution, held-out probes and checkpoints.
-
-The evaluator reports decision-probe safety and over-refusal rates. The inference command generates answer-only text and reports the prompt's refusal probability. Training logs include per-level held-out accuracy, EMA loss, unlock epochs, and reasoning probability.
+`benchmarks/` handles record formatting and streams, `methods/` implements curriculum and losses, `networks/` loads pretrained models and scores tokens, and `experiments/` manages the run lifecycle. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
