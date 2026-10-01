@@ -58,7 +58,7 @@ def digest_inputs(paths):
 
 
 def checkpoint_inputs(paths):
-    from safety.models.artifacts.checkpoint import read_checkpoint
+    from safety.experiments.curriculum.checkpoint import read_checkpoint
 
     files = []
     for filename in paths:

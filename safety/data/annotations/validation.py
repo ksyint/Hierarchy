@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import unicodedata
 
-from benchmarks.korean import canonical_prompt, record_prompts
+from safety.data.annotations.korean import canonical_prompt, record_prompts
 
 
 TEXT_FIELDS = ('prompt', 'chosen', 'rejected_easy', 'rejected_hard')
@@ -201,7 +201,8 @@ def annotation_agreement(records, additional_paths):
 
 def tokenization_inventory(records, model_name, local_model, cache, offline, max_length):
     from transformers import AutoTokenizer
-    from methods.preference import prompt_ids, resolve_backbone
+    from safety.models.preference.learner import prompt_ids
+    from safety.models.preference.backbones import resolve_backbone
     if max_length < 2:
         raise ValueError('Tokenization context must contain at least two tokens.')
     spec = resolve_backbone(model_name)

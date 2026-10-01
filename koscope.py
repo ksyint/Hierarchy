@@ -11,11 +11,13 @@ import random
 import torch
 import yaml
 
-from benchmarks.korean import LevelBenchmark
-from benchmarks.korean import load_records
-from methods.preference import HARMLearner, SFTLearner, restore, save_experiment
-from methods.preference import cuda_device, load_model
-from methods.preference import decision_logits, prompt_ids, resolve_backbone
+from safety.data.annotations.korean import LevelBenchmark
+from safety.data.annotations.korean import load_records
+from safety.models.preference.learner import HARMLearner, SFTLearner, save_experiment
+from safety.models.preference.backbones import restore
+from safety.models.preference.backbones import cuda_device, load_model
+from safety.models.preference.learner import decision_logits, prompt_ids
+from safety.models.preference.backbones import resolve_backbone
 
 
 ROOT = Path(__file__).resolve().parent
@@ -29,6 +31,11 @@ def recipes():
 
 def resolve_recipe(name):
     available = recipes()
+    if name not in available and '/' in name:
+        prefix, replay = name.rsplit('/', 1)
+        candidate = prefix + '-' + replay
+        if candidate in available:
+            name = candidate
     if name not in available:
         raise ValueError(f'Unknown recipe {name!r}. Use --list-recipes to inspect available settings.')
     return available[name]
@@ -71,7 +78,7 @@ REPLAY = {'r020': 0.20, 'r030': 0.30, 'r040': 0.40}
 def command_catalog(argv=None):
     parser = argparse.ArgumentParser(description='Regenerate the Korean preference recipe catalog.')
     parser.parse_args(argv)
-    base = yaml.safe_load((ROOT / 'configs/korean/harm.yaml').read_text())
+    base = yaml.safe_load((ROOT / 'harm.yaml').read_text())
     count = 0
     for gamma, beta, gate, decay, replay in product(GAMMA, BETA, GATES, DECAY, REPLAY):
         config = copy.deepcopy(base)
@@ -81,7 +88,7 @@ def command_catalog(argv=None):
                                     probe_threshold=probe_threshold, kappa=DECAY[decay],
                                     lower_replay=REPLAY[replay])
         validate_recipe(config)
-        path = CATALOG / 'korean' / gamma / beta / gate / decay / (replay + '.yaml')
+        path = CATALOG / 'korean' / gamma / beta / gate / (decay + '-' + replay + '.yaml')
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(config, sort_keys=False))
         count += 1
@@ -94,7 +101,7 @@ def run_experiment(args):
         return
     if args.recipe and args.config:
         raise ValueError('Select --recipe or --config, not both.')
-    config_path = resolve_recipe(args.recipe) if args.recipe else (args.config or f'configs/{args.dataset}/harm.yaml')
+    config_path = resolve_recipe(args.recipe) if args.recipe else (args.config or 'harm.yaml')
     config = validate_recipe(yaml.safe_load(Path(config_path).read_text()))
     config['pretrained'] = dict(model_name=args.model, local_dir=args.local_model, cache_dir=args.cache_dir,
                                 offline=args.offline, attention=args.attention,
@@ -215,7 +222,7 @@ def parse_train_args(argv=None):
     parser.add_argument('--list-recipes', action='store_true')
     parser.add_argument('--dry-run', action='store_true', help='Resolve and validate the experiment without initializing a model.')
     parser.add_argument('--dataset', choices=['korean'], default='korean')
-    parser.add_argument('--config', help='Override configs/<dataset>/harm.yaml.')
+    parser.add_argument('--config', help='Override harm.yaml.')
     parser.add_argument('--data')
     parser.add_argument('--validation')
     parser.add_argument('--model', default='qwen3-4b', help='Published backbone alias or Hugging Face ID.')
@@ -310,21 +317,21 @@ def command_infer(argv=None):
 
 
 def _dispatch_prepare(argv):
-    from benchmarks.korean import command_prepare
+    from safety.data.annotations.korean import command_prepare
     return command_prepare(argv)
 
 
 def _dispatch_download(argv):
-    from methods.preference import command_download
+    from safety.models.preference.backbones import command_download
     return command_download(argv)
 
 
 COMMANDS = {
     'annotations': 'safety.data.annotations.validation',
-    'partitions': 'safety.data.partitions.audit',
+    'partitions': 'safety.data.annotations.audit',
     'benchmark': 'safety.evaluation.decisions.benchmark',
-    'review': 'safety.generation.review.candidates',
-    'artifact': 'safety.models.artifacts.checkpoint',
+    'review': 'safety.data.annotations.candidates',
+    'artifact': 'safety.experiments.curriculum.checkpoint',
     'study': 'safety.experiments.curriculum.study',
 
     'download': _dispatch_download,

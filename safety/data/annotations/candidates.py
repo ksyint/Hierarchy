@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import random
 
-from methods.preference import cuda_device
+from safety.models.preference.backbones import cuda_device
 from safety.data.annotations.validation import AnnotationCorpus
 
 

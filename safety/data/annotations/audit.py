@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import random
 
-from benchmarks.korean import canonical_prompt, group_related_records, load_records, record_prompts, split_groups
+from safety.data.annotations.korean import canonical_prompt, group_related_records, load_records, record_prompts, split_groups
 from safety.data.annotations.validation import AnnotationCorpus
 
 

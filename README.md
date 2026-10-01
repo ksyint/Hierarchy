@@ -22,7 +22,7 @@ The loader places model weights on the selected `cuda`/`cuda:N` device in BF16. 
 | `exaone-2.4b` | [LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | `checkpoints/exaone-2.4b/` |
 | `gemma3-4b` | [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it) | `checkpoints/gemma3-4b/` |
 
-`methods/preference.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
+`safety/models/preference/learner.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
 
 ```bash
 python koscope.py infer --model qwen3-4b --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
@@ -113,25 +113,25 @@ The 243 recipes under `configs/experiments/korean/` vary initial margin, DPO tem
 
 ```bash
 python koscope.py train --list-recipes
-python koscope.py train --recipe korean/g20/b010/standard/k008/r020 --dry-run
-python koscope.py train --recipe korean/g20/b010/standard/k008/r020 --checkpoint outputs/sft/last.pt \
+python koscope.py train --recipe korean/g20/b010/standard/k008-r020 --dry-run
+python koscope.py train --recipe korean/g20/b010/standard/k008-r020 --checkpoint outputs/sft/last.pt \
   --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl --output outputs/recipe
 ```
 
-`benchmarks/korean.py` handles prompt grouping, record formatting and experience streams. `methods/preference.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
+`safety/data/annotations/korean.py` handles prompt grouping, record formatting and experience streams. `safety/models/preference/learner.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
 
 ## Workflow modules
 
 The nested `safety/` modules connect annotation review, token budgets, prompt-disjoint splits, counterfactual benchmarks, adapter artifacts and SFT-to-DPO studies. Existing training and inference commands retain their arguments.
 
-- [Source layout](docs/architecture/source-layout.md)
-- [Adapter artifacts](docs/artifacts/adapter-packages.md)
+- [Source layout](docs/experiments/source-layout.md)
+- [Adapter artifacts](docs/experiments/adapter-packages.md)
 - [Annotation contracts](docs/data/annotation-contract.md)
 - [Prompt-disjoint partitions](docs/data/partitions.md)
 - [Tokenizer budgets](docs/data/tokenization.md)
 - [Language and paired comparisons](docs/evaluation/cross-language.md)
 - [Decision benchmarks](docs/evaluation/decision-benchmarks.md)
 - [Curriculum studies](docs/experiments/curriculum-studies.md)
-- [Teacher candidate review](docs/generation/teacher-review.md)
+- [Teacher candidate review](docs/data/teacher-review.md)
 
 Each extended command exposes its options through `python koscope.py COMMAND --help`. JSON schemas are in `schemas/` and replaceable input examples are in `examples/`.

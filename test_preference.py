@@ -2,10 +2,10 @@ import math
 import pytest
 import torch
 import torch.nn.functional as F
-from methods.preference import HierarchicalCurriculum
-from methods.preference import ccr_loss, harm_dpo_loss
-from methods.preference import sequence_log_probs
-from methods.preference import prepare_batch
+from safety.models.preference.learner import HierarchicalCurriculum
+from safety.models.preference.learner import ccr_loss, harm_dpo_loss
+from safety.models.preference.learner import sequence_log_probs
+from safety.models.preference.learner import prepare_batch
 
 
 class ByteTokenizer:

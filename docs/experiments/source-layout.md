@@ -1,6 +1,6 @@
 # Source layout
 
-`methods/preference.py` keeps model loading, likelihoods and learner state together. `benchmarks/korean.py` owns the training stream. Extended workflow modules form separate annotation, partition, evaluation, teacher-review, artifact and study branches under `safety/`.
+`safety/models/preference` pairs pinned backbone loading and checkpoint restoration with preference likelihoods and learner state. `safety/data/annotations` groups the Korean training stream, validation, partition auditing and teacher review in four modules. `safety/evaluation/decisions` separates model scoring from decision reports. `safety/experiments/curriculum` keeps study execution beside checkpoint packaging.
 
 ```bash
 python koscope.py annotations --help

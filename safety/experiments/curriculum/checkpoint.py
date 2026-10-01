@@ -8,7 +8,7 @@ import shutil
 
 import torch
 
-from methods.preference import resolve_backbone, restore
+from safety.models.preference.backbones import resolve_backbone, restore
 
 
 @dataclass(frozen=True)
