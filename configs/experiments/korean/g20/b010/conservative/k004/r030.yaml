@@ -1,0 +1,28 @@
+seed: 42
+model_dim: 48
+batch_size: 4
+epochs: 80
+steps_per_epoch: 20
+lr: 5.0e-06
+weight_decay: 0.01
+beta: 0.1
+lambda_ccr: 0.3
+max_length: 2048
+decision_tokens:
+- ' No'
+- ' Yes'
+curriculum:
+  rho: 0.1
+  thresholds:
+  - 0.25
+  - 0.2
+  probe_threshold: 0.9
+  gamma0: 2.0
+  kappa: 0.04
+  ramps:
+  - 8
+  - 8
+  - 8
+  lower_replay: 0.3
+  explicit_start: 48
+  explicit_fade: 32

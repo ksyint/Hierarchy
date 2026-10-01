@@ -3,15 +3,9 @@ import json
 
 import torch
 
-from utils.data import load_records, synthetic_records
-from utils.models import decision_logits, load_model
-
-
-def restore(path, device):
-    checkpoint = torch.load(path, map_location=device, weights_only=True)
-    model, tokenizer = load_model(checkpoint['model_name'], checkpoint['config']['model_dim'], device, checkpoint['lora'])
-    model.load_state_dict(checkpoint['model'])
-    return model.eval(), tokenizer, checkpoint['config']
+from benchmarks.records import load_records, synthetic_records
+from networks.scoring import decision_logits
+from experiments.checkpoint import restore
 
 
 def main(args):
@@ -36,5 +30,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--data')
-    parser.add_argument('--device', default='cpu')
+    parser.add_argument('--device', default='cuda')
     main(parser.parse_args())

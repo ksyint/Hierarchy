@@ -3,8 +3,8 @@ import json
 
 import torch
 
-from eval import restore
-from utils.models import decision_logits
+from experiments.checkpoint import restore
+from networks.scoring import decision_logits
 
 
 def main(args):
@@ -31,6 +31,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--prompt', required=True)
-    parser.add_argument('--device', default='cpu')
+    parser.add_argument('--device', default='cuda')
     parser.add_argument('--max_new_tokens', type=int, default=64)
     main(parser.parse_args())
