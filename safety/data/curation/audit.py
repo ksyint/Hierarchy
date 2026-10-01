@@ -8,7 +8,7 @@ from pathlib import Path
 import random
 
 from safety.data.korean import canonical_prompt, group_related_records, load_records, record_prompts, split_groups
-from safety.data.validation import AnnotationCorpus
+from safety.data.curation.validation import AnnotationCorpus
 
 
 @dataclass(frozen=True)

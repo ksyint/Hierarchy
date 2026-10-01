@@ -1,6 +1,6 @@
 # Source layout
 
-`safety/models` pairs pinned backbone loading and checkpoint restoration with preference likelihoods and learner state. `safety/data` groups the Korean training stream, validation, partition auditing and teacher review in four modules. `safety/evaluation` separates model scoring from decision reports. `safety/study.py` and `safety/checkpoint.py` sit beside those packages and connect their experiment and artifact workflows.
+`safety/models` pairs pinned backbone loading and checkpoint restoration with preference likelihoods and learner state. `safety/data` keeps the Korean training stream and teacher review beside `safety/data/curation`, which contains annotation validation and partition auditing. `safety/evaluation` separates model scoring from decision reports. `safety/study.py` and `safety/checkpoint.py` sit beside those packages and connect their experiment and artifact workflows.
 
 ```bash
 python koscope.py annotations --help

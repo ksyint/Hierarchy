@@ -7,7 +7,7 @@ from pathlib import Path
 import random
 
 from safety.models.backbones import cuda_device
-from safety.data.validation import AnnotationCorpus
+from safety.data.curation.validation import AnnotationCorpus
 
 
 ROLES = ('chosen', 'rejected_easy', 'rejected_hard')

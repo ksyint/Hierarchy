@@ -346,8 +346,8 @@ def _dispatch_download(argv):
 
 
 COMMANDS = {
-    'annotations': 'safety.data.validation',
-    'partitions': 'safety.data.audit',
+    'annotations': 'safety.data.curation.validation',
+    'partitions': 'safety.data.curation.audit',
     'benchmark': 'safety.evaluation.benchmark',
     'review': 'safety.data.candidates',
     'artifact': 'safety.checkpoint',

@@ -9,7 +9,7 @@ import torch
 from safety.data.korean import load_records
 from safety.models.learner import decision_logits, prompt_ids
 from safety.models.backbones import restore
-from safety.data.validation import AnnotationCorpus
+from safety.data.curation.validation import AnnotationCorpus
 
 from safety.evaluation.reports import (
     validate_predictions, grouped_report, compare_predictions, decision_curve,
