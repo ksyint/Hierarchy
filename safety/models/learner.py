@@ -9,6 +9,8 @@ import torch
 import torch.nn.functional as F
 
 from safety.data.korean import format_pair
+from safety.training.optim import optimizer_update, update_learning_rate
+from safety.training.schedule import CurriculumPolicy
 
 
 
@@ -21,6 +23,12 @@ def prompt_ids(tokenizer, prompt):
 
 
 def prepare_batch(tokenizer, prompts, responses, device, max_length=2048):
+    if not prompts or len(prompts) != len(responses):
+        raise ValueError('Prompt and response batches must be nonempty and aligned.')
+    if type(max_length) is not int or max_length < 2:
+        raise ValueError('Token budget must allow at least one context token and one completion token.')
+    if any(not isinstance(value, str) or not value.strip() for value in [*prompts, *responses]):
+        raise ValueError('Prompt and response values must be nonempty strings.')
     sequences, masks = [], []
     bos = tokenizer.bos_token_id
     if bos is None:
@@ -50,6 +58,12 @@ def sequence_log_probs(logits, input_ids, completion_mask):
     """Sum only response-token log likelihood, with the autoregressive shift."""
     if logits.shape[:2] != input_ids.shape or completion_mask.shape != input_ids.shape:
         raise ValueError('Logits, token IDs and completion masks have incompatible shapes.')
+    if logits.ndim != 3 or input_ids.shape[1] < 2:
+        raise ValueError('Token scoring requires B,T,V logits with at least two tokens.')
+    if not ((completion_mask == 0) | (completion_mask == 1)).all():
+        raise ValueError('Completion masks must be binary.')
+    if (completion_mask[:, 1:].sum(-1) == 0).any():
+        raise ValueError('Every sequence needs at least one scored completion token.')
     scores = []
     for start in range(0, input_ids.shape[1] - 1, 128):
         stop = min(start + 128, input_ids.shape[1] - 1)
@@ -188,7 +202,8 @@ class PreferenceLearner:
     def __init__(self, model, tokenizer, optimizer, config, device, total_experiences):
         self.model, self.tokenizer, self.optimizer = model, tokenizer, optimizer
         self.config, self.device = config, device
-        self.curriculum = HierarchicalCurriculum(**config['curriculum'])
+        self.curriculum = CurriculumPolicy(HierarchicalCurriculum(**config['curriculum']), config.get('ablation'))
+        self.events = None
         self.total_steps = total_experiences * config['steps_per_epoch']
         self.warmup = max(1, int(0.05 * self.total_steps))
         self.losses_by_level = {}
@@ -210,26 +225,28 @@ class PreferenceLearner:
         epoch = experience.current_experience
         for iteration in range(self.config['steps_per_epoch']):
             step = epoch * self.config['steps_per_epoch'] + iteration
-            if step < self.warmup:
-                scale = (step + 1) / self.warmup
-            else:
-                progress = (step - self.warmup) / max(1, self.total_steps - self.warmup)
-                scale = 0.5 * (1 + math.cos(math.pi * progress))
-            for group in self.optimizer.param_groups:
-                group['lr'] = self.config['lr'] * scale
+            rate = update_learning_rate(self.optimizer, step, self.total_steps, self.config)
             self.optimizer.zero_grad(set_to_none=True)
             accumulation = self.config.get('gradient_accumulation', 1)
             accumulated_loss = 0
+            sampled = []
             for _ in range(accumulation):
                 rows = experience.sample(self.config['batch_size'], self.curriculum, self.stage)
+                sampled.extend(rows)
                 loss, plain_dpo = self.objective(rows, epoch)
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(f'Nonfinite objective at epoch {epoch}, step {step}.')
                 if plain_dpo is not None:
                     for row, value in zip(rows, plain_dpo.detach().tolist()):
                         self.losses_by_level[row['level']].append(value)
                 (loss / accumulation).backward()
                 accumulated_loss += loss.detach().item() / accumulation
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
+            inspect_every = self.config.get('inspect_gradients_every', 0)
+            gradients = optimizer_update(self.model, self.optimizer, self.config.get('maximum_gradient_norm', 1.0),
+                                         inspect=inspect_every > 0 and step % inspect_every == 0)
+            every = self.config.get('log_every', 10)
+            if self.events and (iteration % every == 0 or iteration == self.config['steps_per_epoch'] - 1):
+                self.events.update(epoch, step, accumulated_loss, rate, gradients['gradient_norm'], sampled)
             losses.append(accumulated_loss)
         self.last_train_loss = sum(losses) / len(losses)
         return self.last_train_loss
@@ -240,11 +257,12 @@ class PreferenceLearner:
 
     def finish_experience(self, experience, accuracy):
         epoch = experience.current_experience
+        level_losses = {level: sum(values) / len(values)
+                        for level, values in self.losses_by_level.items() if values}
         if self.stage == 'dpo':
-            level_losses = {level: sum(values) / len(values)
-                            for level, values in self.losses_by_level.items() if values}
             self.curriculum.update(epoch, level_losses, accuracy)
         return {'epoch': epoch, 'loss': self.last_train_loss, 'probe_accuracy': accuracy,
+                'level_losses': level_losses,
                 'curriculum': self.curriculum.state_dict(),
                 'explicit_probability': self.curriculum.explicit_probability(epoch)}
 

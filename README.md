@@ -22,7 +22,7 @@ The loader places model weights on the selected `cuda`/`cuda:N` device in BF16. 
 | `exaone-2.4b` | [LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct](https://huggingface.co/LGAI-EXAONE/EXAONE-3.5-2.4B-Instruct) | `checkpoints/exaone-2.4b/` |
 | `gemma3-4b` | [google/gemma-3-4b-it](https://huggingface.co/google/gemma-3-4b-it) | `checkpoints/gemma3-4b/` |
 
-`safety/models/learner.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
+`safety/models/backbones.py` pins each published revision. Tokenizers, model configs and sharded weights download into `.cache/huggingface/`. Repeat runs reuse this cache. `--cache-dir /path/to/cache` selects a shared cache. No separate download command is needed for normal execution:
 
 ```bash
 python koscope.py infer --model qwen3-4b --prompt '안전한 비밀번호 관리 방법을 알려 주세요.' --device cuda
@@ -118,7 +118,7 @@ python koscope.py train --recipe korean/g20/b010/standard/k008-r020 --checkpoint
   --data data/korean/preferences.jsonl --validation data/korean/validation.jsonl --output outputs/recipe
 ```
 
-`safety/data/korean.py` handles prompt grouping, record formatting and experience streams. `safety/models/learner.py` keeps the model registry, token scoring, curriculum, objectives and checkpoint state together. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
+`safety/data/korean.py` handles prompt grouping, record formatting and experience streams. `safety/models/learner.py` contains token scoring, curriculum updates and preference objectives. The `safety/training/` modules manage optimizer updates, state recovery and training events. `koscope.py` manages preparation, teacher candidates, training and evaluation commands. Use `python koscope.py COMMAND --help` to inspect one command. Evaluation reports decision safety and over-refusal rates, while inference generates answer-only text.
 
 ## Workflow modules
 
@@ -135,3 +135,52 @@ The nested `safety/` modules connect annotation review, token budgets, prompt-di
 - [Teacher candidate review](docs/data/teacher-review.md)
 
 Each extended command exposes its options through `python koscope.py COMMAND --help`. JSON schemas are in `schemas/` and replaceable input examples are in `examples/`.
+
+## Source conversion and reviewed preferences
+
+`convert-source` accepts downloaded JSONL, JSON, CSV and TSV. Supply a YAML mapping with `source`, `stage: seed`, `fields` mapping normalized names to source column names, and `defaults` for reviewed metadata. A nested source field uses dot notation. `values.decision` and `values.level` map source labels explicitly. No category or intent label is inferred from a dataset name.
+
+```bash
+python koscope.py convert-source --input data/raw/source.csv --mapping data/source-mapping.yaml --output data/raw/seeds.jsonl --report reports/conversion.json
+python koscope.py records --input data/raw/seeds.jsonl --stage seed --report reports/seeds.json
+python koscope.py teacher-requests build --seeds data/raw/seeds.jsonl --output data/raw/requests.jsonl --report reports/requests.json
+python koscope.py teacher-batches --requests data/raw/requests.jsonl --output data/raw/responses.jsonl --device cuda --batch-size 2
+python koscope.py select-preferences review-sheet --requests data/raw/requests.jsonl --responses data/raw/responses.jsonl --output data/raw/reviews.jsonl
+```
+
+Teacher batches load the same pinned strong, medium and AWQ weak models sequentially. `--resume` validates completed request identities before continuing. Each review specifies `accepted`, the response `decision` and a numeric `quality`. After reviewing these fields, assemble complete triples:
+
+```bash
+python koscope.py select-preferences assemble --seeds data/raw/seeds.jsonl --requests data/raw/requests.jsonl --responses data/raw/responses.jsonl --reviews data/raw/reviews.jsonl --output data/raw/preferences.jsonl --report reports/selection.json
+python koscope.py token-budget --input data/raw/preferences.jsonl --model qwen3-4b --report reports/tokens.json
+```
+
+`counterfactuals` joins reviewed variants by original ID and records edit spans. `taxonomy` applies a versioned, reviewed category mapping or compares independent annotations. `sampling` reports the expected exposure of each level and source before a training run.
+
+## Training state and component studies
+
+Training now writes `training-state.pt` after each completed epoch. It contains trainable policy and reference weights, optimizer moments, curriculum state, random states and the sampler position. Resume with the same training arguments plus `--resume-state outputs/dpo/training-state.pt`. The input file digests and training configuration must match. The final portable policy remains at `last.pt`. Validation improvements export `best.pt`, selected by macro decision accuracy across the three levels.
+
+`--ablation` selects `full`, `no_curriculum`, `fixed_schedule`, `no_margin_decay`, `no_ccr`, `explicit_only` or `implicit_only`. The full setting retains the competence-gated curriculum. Source balancing is optional through `--balance-source source --sampling-temperature 0`. The default sampling temperature of 1 preserves source proportions within each level.
+
+```bash
+python koscope.py training-events --events outputs/dpo/updates.jsonl --output reports/training.json --updates-csv reports/updates.csv
+python koscope.py training-state --state outputs/dpo/training-state.pt --output reports/state.json
+python koscope.py curriculum-replay --config harm.yaml --history outputs/dpo/metrics.json --output reports/curriculum.json
+```
+
+## Response evaluation and paired comparisons
+
+`answers generate` writes held-out responses using either `--mode implicit` or `--mode explicit`. `answers judge` loads a selected CUDA language model and records structured judgments. `answers judge-agreement` compares those judgments with an independent reference review. `answers score` reports response safety, over-refusal and helpfulness from the reviewed answers. Decision-verbalizer evaluations remain available through `evaluate` and `benchmark`.
+
+```bash
+python koscope.py answers generate --checkpoint outputs/dpo/best.pt --input data/korean/test.jsonl --output outputs/answers.jsonl --device cuda
+python koscope.py answers judge --predictions outputs/answers.jsonl --model teacher-strong --output outputs/judgments.jsonl --device cuda
+python koscope.py answers score --predictions outputs/answers.jsonl --reviews outputs/judgments.jsonl --output reports/responses.json
+python koscope.py paired-bootstrap --reference outputs/reference.jsonl --candidate full=outputs/full.jsonl --resamples 1000 --output reports/paired.json
+python koscope.py latency --checkpoint outputs/dpo/best.pt --input data/korean/test.jsonl --limit 100 --output reports/latency.json --details reports/latency-batches.jsonl --device cuda
+```
+
+Paired bootstrap aligns exact IDs and training seeds, stratifies by seed, level and intent, and applies Holm correction across the requested comparisons. `--per-seed 2500` selects the same stratified held-out subset for every compared method. Latency records the GPU, generation backend, context and output budgets, synchronized batch times and memory use. Both reasoning modes use identical prompts and alternate measurement order.
+
+`robustness perturb` creates a separate training copy with a specified fraction of hierarchy-label changes. Evaluation uses the unchanged held-out set. `robustness surface` compares reviewed intent-preserving variants. `transfer` joins translated prompts by `parallel_id`, checks intent and level agreement, and compares only complete language groups.

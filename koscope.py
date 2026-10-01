@@ -18,6 +18,11 @@ from safety.models.backbones import cuda_device, load_model
 from safety.models.learner import decision_logits, prompt_ids
 from safety.models.backbones import resolve_backbone
 from safety.study import catalog_layout, load_recipe, save_recipe
+from safety.data.sampling import LevelSampler, SampledExperience
+from safety.training.events import TrainingEvents
+from safety.training.optim import build_optimizer
+from safety.training.schedule import POLICIES, configure_ablation
+from safety.training.state import load_state, save_state, save_inference_checkpoint
 
 
 ROOT = Path(__file__).resolve().parent
@@ -85,7 +90,7 @@ def recipe_name(gamma, beta, gate, decay, replay):
 
 
 RECIPE_NAMES = sorted(recipe_name(*values) for values in product(GAMMA, BETA, GATES, DECAY, REPLAY))
-PYTHON_RECIPES = frozenset(RECIPE_NAMES[:108])
+PYTHON_RECIPES = frozenset(RECIPE_NAMES[:100])
 RECIPE_LAYOUT = catalog_layout(Path('configs/experiments') / (name + '.yaml') for name in RECIPE_NAMES)
 
 
@@ -122,6 +127,11 @@ def run_experiment(args):
         raise ValueError('Select --recipe or --config, not both.')
     config_path = resolve_recipe(args.recipe) if args.recipe else (args.config or 'harm.yaml')
     config = validate_recipe(load_recipe(config_path))
+    config = configure_ablation(config, args.ablation)
+    config['sampling'] = {'balance_field': args.balance_source, 'temperature': args.sampling_temperature}
+    config['log_every'] = args.log_every
+    config['inspect_gradients_every'] = args.inspect_gradients_every
+    config['maximum_gradient_norm'] = args.maximum_gradient_norm
     config['pretrained'] = dict(model_name=args.model, local_dir=args.local_model, cache_dir=args.cache_dir,
                                 offline=args.offline, attention=args.attention,
                                 gradient_checkpointing=args.gradient_checkpointing, lora=args.lora)
@@ -136,6 +146,13 @@ def run_experiment(args):
         config['epochs'] = config.get('sft_epochs', 50)
     if args.epochs is not None:
         config['epochs'] = args.epochs
+    validate_recipe(config)
+    if args.log_every < 1 or args.inspect_gradients_every < 0:
+        raise ValueError('Logging interval must be positive and gradient inspection interval nonnegative.')
+    if not math.isfinite(args.maximum_gradient_norm) or args.maximum_gradient_norm <= 0:
+        raise ValueError('Gradient clipping norm must be finite and positive.')
+    if not math.isfinite(args.sampling_temperature) or args.sampling_temperature < 0:
+        raise ValueError('Sampling temperature must be finite and nonnegative.')
     if args.dry_run:
         print(json.dumps({'config_path': str(config_path), 'strategy': args.stage, 'config': config,
                           'data': args.data, 'validation': args.validation, 'model': args.model,
@@ -143,7 +160,10 @@ def run_experiment(args):
         return
     if not args.data or not args.validation:
         raise ValueError('Supply prompt-disjoint --data and --validation preference JSONL files.')
+    if args.resume_state and Path(args.resume_state).resolve().parent != Path(args.output).resolve():
+        raise ValueError('Resume in the directory containing training-state.pt and its selected checkpoints.')
     seed = args.seed if args.seed is not None else config['seed']
+    config['seed'] = seed
     torch.manual_seed(seed)
     random.seed(seed)
     torch.set_num_threads(args.threads)
@@ -163,16 +183,38 @@ def run_experiment(args):
             model.enable_input_require_grads()
     else:
         model, tokenizer = load_model(device=args.device, **config['pretrained'])
-    optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
-                                 lr=config['lr'], weight_decay=config['weight_decay'])
+    from safety.data.sources import file_digest
+    config['input_sha256'] = {'train': file_digest(args.data), 'validation': file_digest(args.validation)}
+    config['initial_checkpoint_sha256'] = file_digest(args.checkpoint) if args.checkpoint else None
+    optimizer, optimizer_inventory = build_optimizer(model, config)
     method = SFTLearner if args.stage == 'sft' else HARMLearner
     strategy = method(model, tokenizer, optimizer, config, args.device, epochs)
-    results = []
-    for experience in benchmark.train_stream:
-        strategy.train(experience)
-        accuracy = strategy.eval(benchmark.test_stream)
-        results.append(strategy.finish_experience(experience, accuracy))
-        print(json.dumps(results[-1]))
+    sampler = LevelSampler(benchmark.levels, seed, args.balance_source, args.sampling_temperature)
+    next_epoch, results = load_state(args.resume_state, strategy, sampler) if args.resume_state else (0, [])
+    if next_epoch > epochs:
+        raise ValueError('Resume state is beyond the configured training duration.')
+    destination = Path(args.output)
+    destination.mkdir(parents=True, exist_ok=True)
+    if results and not (destination / 'best.pt').is_file():
+        raise FileNotFoundError('Resume requires the validation-selected best.pt in the output directory.')
+    (destination / 'optimizer.json').write_text(json.dumps(optimizer_inventory, indent=2) + '\n')
+    best = max((row.get('selection_score', -math.inf) for row in results), default=-math.inf)
+    with TrainingEvents(destination / 'updates.jsonl', next_epoch) as events:
+        strategy.events = events
+        for epoch in range(next_epoch, epochs):
+            experience = SampledExperience(epoch, sampler)
+            strategy.train(experience)
+            accuracy = strategy.eval(benchmark.test_stream)
+            row = strategy.finish_experience(experience, accuracy)
+            row['selection_score'] = sum(accuracy.values()) / len(accuracy)
+            row['selection_metric'] = 'macro_level_validation_decision_accuracy'
+            results.append(row)
+            events.epoch(row, sampler)
+            if row['selection_score'] > best:
+                best = row['selection_score']
+                save_inference_checkpoint(destination, strategy, epoch, best)
+            save_state(destination / 'training-state.pt', strategy, sampler, results, epoch + 1)
+            print(json.dumps(row))
     save_experiment(strategy, args, results)
 
 
@@ -257,6 +299,13 @@ def parse_train_args(argv=None):
     parser.add_argument('--accumulation', type=int, help='Microbatches per optimizer update.')
     parser.add_argument('--epochs', type=int)
     parser.add_argument('--seed', type=int)
+    parser.add_argument('--resume-state', help='Resume optimizer, reference, curriculum and random state at an epoch boundary.')
+    parser.add_argument('--ablation', choices=POLICIES, default='full')
+    parser.add_argument('--balance-source', choices=['source', 'category', 'language'])
+    parser.add_argument('--sampling-temperature', type=float, default=1.0)
+    parser.add_argument('--log-every', type=int, default=10)
+    parser.add_argument('--inspect-gradients-every', type=int, default=0)
+    parser.add_argument('--maximum-gradient-norm', type=float, default=1.0)
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--threads', type=int, default=2)
     parser.add_argument('--output', default='outputs/qwen3-4b')
@@ -346,6 +395,24 @@ def _dispatch_download(argv):
 
 
 COMMANDS = {
+    'records': 'safety.data.schema',
+    'convert-source': 'safety.data.sources',
+    'taxonomy': 'safety.data.taxonomy',
+    'counterfactuals': 'safety.data.counterfactuals',
+    'token-budget': 'safety.data.tokenization',
+    'sampling': 'safety.data.sampling',
+    'teacher-requests': 'safety.generation.requests',
+    'teacher-batches': 'safety.generation.batched',
+    'select-preferences': 'safety.generation.selection',
+    'training-state': 'safety.training.state',
+    'learning-rates': 'safety.training.optim',
+    'training-events': 'safety.training.events',
+    'curriculum-replay': 'safety.training.schedule',
+    'paired-bootstrap': 'safety.evaluation.bootstrap',
+    'answers': 'safety.evaluation.generation',
+    'latency': 'safety.evaluation.latency',
+    'robustness': 'safety.evaluation.robustness',
+    'transfer': 'safety.evaluation.transfer',
     'annotations': 'safety.data.validation',
     'partitions': 'safety.data.audit',
     'benchmark': 'safety.evaluation.benchmark',
