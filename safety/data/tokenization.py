@@ -41,10 +41,12 @@ def sequence_contract(tokenizer, prompt, response, max_length):
     if len(suffix) >= max_length:
         return {'valid': False, 'prompt_tokens': len(prefix), 'response_tokens': len(suffix),
                 'error': 'response_exceeds_budget'}
-    retained = min(len(prefix), max_length - len(suffix))
+    if len(prefix) + len(suffix) > max_length:
+        return {'valid': False, 'prompt_tokens': len(prefix), 'response_tokens': len(suffix),
+                'error': 'sequence_exceeds_budget'}
     return {'valid': True, 'prompt_tokens': len(prefix), 'response_tokens': len(suffix),
-            'retained_prompt_tokens': retained, 'truncated_prompt_tokens': len(prefix) - retained,
-            'sequence_tokens': retained + len(suffix), 'scored_tokens': len(suffix)}
+            'retained_prompt_tokens': len(prefix), 'truncated_prompt_tokens': 0,
+            'sequence_tokens': len(prefix) + len(suffix), 'scored_tokens': len(suffix)}
 
 
 def quantiles(values):
@@ -99,10 +101,12 @@ def cache_tokens(rows, tokenizer, destination, max_length=2048):
                     suffix = tokenizer.encode(response, add_special_tokens=False) + [tokenizer.eos_token_id]
                     if len(suffix) >= max_length:
                         raise ValueError(f'{row["id"]}: {role} exceeds the response budget.')
-                    context = prefix[-(max_length - len(suffix)):]
+                    if len(prefix) + len(suffix) > max_length:
+                        raise ValueError(f'{row["id"]}: prompt and {role} exceed max_length; '
+                                         'increase the limit or curate the record.')
                     entries.append({'explicit': explicit, 'hard': hard, 'role': role,
-                                    'input_ids': context + suffix,
-                                    'response_mask': [0] * len(context) + [1] * len(suffix)})
+                                    'input_ids': prefix + suffix,
+                                    'response_mask': [0] * len(prefix) + [1] * len(suffix)})
         digest = hashlib.sha256(json.dumps(row, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         records.append({'id': row['id'], 'record_sha256': digest, 'tokenizer': tokenizer_name,
                         'max_length': max_length, 'variants': entries})
@@ -149,7 +153,7 @@ def main(argv=None):
     if args.details:
         write_jsonl(args.details, details)
     if report['counts'].get('invalid'):
-        raise ValueError(f'Some responses exceed the token budget. See {output}.')
+        raise ValueError(f'Some prompt/response sequences exceed the token budget. See {output}.')
     if args.token_cache:
         cache_tokens(rows, tokenizer, args.token_cache, args.max_length)
     print(json.dumps({'report': str(output), 'records': len(rows)}))

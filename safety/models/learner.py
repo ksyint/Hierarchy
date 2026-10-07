@@ -40,7 +40,9 @@ def prepare_batch(tokenizer, prompts, responses, device, max_length=2048):
         suffix = tokenizer.encode(response, add_special_tokens=False) + [tokenizer.eos_token_id]
         if len(suffix) >= max_length:
             raise ValueError('Response exceeds max_length; raise limit instead of silently truncating preference data.')
-        prefix = prefix[-(max_length - len(suffix)):]
+        if len(prefix) + len(suffix) > max_length:
+            raise ValueError('Prompt and response exceed max_length; increase the limit or curate the record '
+                             'so chosen and rejected responses retain the same complete prompt.')
         sequences.append(prefix + suffix)
         masks.append([0] * len(prefix) + [1] * len(suffix))
     width = max(map(len, sequences))

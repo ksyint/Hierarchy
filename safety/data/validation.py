@@ -213,7 +213,7 @@ def tokenization_inventory(records, model_name, local_model, cache, offline, max
     if tokenizer.eos_token_id is None:
         raise ValueError('The selected tokenizer must define an EOS token.')
     rows = []
-    totals = Counter()
+    totals = Counter(prompt_truncations=0)
     for record in records:
         prompts = [('plain', record['prompt'] + '\n[WITHOUT_THINKING]\n'), ('explicit', record['prompt'])]
         for form, prompt in prompts:
@@ -225,13 +225,13 @@ def tokenization_inventory(records, model_name, local_model, cache, offline, max
                     response = f'[THINKING]{thought}[/THINKING]\n{response}'
                 suffix = len(tokenizer.encode(response, add_special_tokens=False)) + 1
                 oversized = suffix >= max_length
-                truncated = max(0, prefix + suffix - max_length)
+                invalid = oversized or prefix + suffix > max_length
                 totals['sequences'] += 1
                 totals['oversized_responses'] += oversized
-                totals['prompt_truncations'] += truncated > 0 and not oversized
+                totals['invalid_sequences'] += invalid
                 rows.append({'id': record.get('id', AnnotationCorpus.identity(record)), 'form': form, 'field': field,
                              'prompt_tokens': prefix, 'response_tokens': suffix, 'total_tokens': prefix + suffix,
-                             'prompt_tokens_removed': min(prefix, truncated), 'response_exceeds_context': oversized})
+                             'valid': not invalid, 'prompt_tokens_removed': 0, 'response_exceeds_context': oversized})
     return {'model': spec.repo, 'revision': spec.revision, 'max_length': max_length,
             'summary': dict(totals), 'sequences': rows}
 

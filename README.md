@@ -67,7 +67,7 @@ data/korean/
   split.json
 ```
 
-Use official held-out sets unchanged when they already exist. Prepare training pools separately and export the same schema. The training loader verifies level coverage and rejects overlapping training/validation prompts in either primary or counterfactual fields, after Unicode and whitespace normalization. Long completions are rejected with a context-length error. Raise `max_length` or curate the affected records before training. Tokenization uses the downloaded tokenizer, masks prompt/padding tokens and includes completion EOS.
+Use official held-out sets unchanged when they already exist. Prepare training pools separately and export the same schema. The training loader verifies level coverage and rejects overlapping training/validation prompts in either primary or counterfactual fields, after Unicode and whitespace normalization. The complete prompt plus completion and EOS must fit `max_length`; oversized sequences are rejected so preference alternatives retain identical prompt context. Raise `max_length` or curate the affected records before training. Tokenization uses the downloaded tokenizer, masks prompt/padding tokens and includes completion EOS.
 
 ### Teacher-generated candidate responses
 
@@ -184,3 +184,7 @@ python koscope.py latency --checkpoint outputs/dpo/best.pt --input data/korean/t
 Paired bootstrap aligns exact IDs and training seeds, stratifies by seed, level and intent, and applies Holm correction across the requested comparisons. `--per-seed 2500` selects the same stratified held-out subset for every compared method. Latency records the GPU, generation backend, context and output budgets, synchronized batch times and memory use. Both reasoning modes use identical prompts and alternate measurement order.
 
 `robustness perturb` creates a separate training copy with a specified fraction of hierarchy-label changes. Evaluation uses the unchanged held-out set. `robustness surface` compares reviewed intent-preserving variants. `transfer` joins translated prompts by `parallel_id`, checks intent and level agreement, and compares only complete language groups.
+
+## Paper reproduction scope
+
+The repository includes HARM-DPO, HSC and intent-flip CCR implementations, but the default workflows do not reproduce every experimental protocol in the paper. `best.pt` uses macro decision-probe accuracy over the supplied validation file, rather than generated-response Safety on the paper's fixed 530-sample subset. Built-in teacher generation disables thinking; provide reviewed `chosen_thinking`, `rejected_easy_thinking` and `rejected_hard_thinking` fields to reproduce reasoning supervision and its subsequent fading. The counterfactual tools check reviewed labels and exact duplicates but do not run the paper's mE5-large cosine-similarity filter. Bootstrap reports use two-sided p-values and Holm correction, whereas Appendix E reports one-sided p-values and discusses Bonferroni correction separately. These distinctions must be resolved for a matched reproduction of the reported results.
